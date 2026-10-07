@@ -1,0 +1,544 @@
+<title>Race to Domain Admin</title>
+<style>
+  /* Deliberate single-dark tactical command-center look for a game. All colors explicit.
+     Layout: top status bar (objective, detection meter, turn, score) · center SVG network map ·
+     right ops column (intel, actions, log). Stacks on phone. */
+  :root{
+    color-scheme:dark;
+    --bg:#090d18; --panel:#111a2e; --panel-2:#0c1322; --inset:#0a1120;
+    --line:#1e2a42; --line-2:#2b3a58;
+    --fg:#e6ecf7; --muted:#8a97b2; --faint:#56637f;
+    --red:#ef4a5e; --red-soft:rgba(239,74,94,.14); --red-2:#ff6b7d;
+    --blue:#3ab6f0; --blue-soft:rgba(58,182,240,.14);
+    --amber:#f0a93a; --amber-soft:rgba(240,169,58,.15);
+    --green:#46d183; --green-soft:rgba(70,209,131,.14);
+    --gold:#ffd24a;
+    --disp:"Chakra Petch","Segoe UI",system-ui,sans-serif;
+    --mono:"JetBrains Mono",ui-monospace,Menlo,Consolas,monospace;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{background:
+      radial-gradient(1200px 600px at 70% -10%, rgba(58,182,240,.06), transparent 60%),
+      radial-gradient(900px 500px at 10% 110%, rgba(239,74,94,.06), transparent 60%),
+      var(--bg);
+    color:var(--fg);font-family:var(--sans);line-height:1.5;font-size:14px;-webkit-font-smoothing:antialiased}
+  button{font-family:inherit;cursor:pointer}
+  h1,h2,h3{margin:0}
+  .wrap{max-width:1300px;margin:0 auto;padding-block:0 26px;padding-inline:16px}
+
+  /* top bar */
+  header.top{position:sticky;top:env(safe-area-inset-top,0px);z-index:20;
+    background:linear-gradient(180deg,rgba(9,13,24,.96),rgba(9,13,24,.82));backdrop-filter:blur(8px);
+    border-bottom:1px solid var(--line);margin-inline:-16px;padding:11px 16px;}
+  .topline{display:flex;flex-wrap:wrap;gap:12px 18px;align-items:center}
+  .brand{display:flex;flex-direction:column;gap:1px;min-width:0}
+  .brand h1{font-family:var(--disp);font-size:18px;font-weight:700;letter-spacing:.02em;display:flex;align-items:center;gap:9px}
+  .brand h1 .rb{color:var(--red)} .brand h1 .bb{color:var(--blue)}
+  .brand .sub{font-family:var(--mono);font-size:11px;color:var(--muted)}
+  .stats{margin-left:auto;display:flex;gap:9px;align-items:center;flex-wrap:wrap}
+  .stat{font-family:var(--mono);font-size:11.5px;color:var(--muted);border:1px solid var(--line);border-radius:8px;padding:5px 10px;white-space:nowrap}
+  .stat b{color:var(--fg);font-weight:700;font-variant-numeric:tabular-nums}
+  .stat.obj b{color:var(--gold)}
+
+  /* detection meter */
+  .meter-wrap{display:flex;flex-direction:column;gap:3px;min-width:200px;flex:1}
+  .meter-top{display:flex;justify-content:space-between;align-items:baseline;font-family:var(--mono);font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+  .meter-top b{font-size:12px;color:var(--blue);font-weight:700}
+  .meter{height:12px;border-radius:7px;background:var(--inset);border:1px solid var(--line-2);overflow:hidden;position:relative}
+  .meter .fill{height:100%;width:0;background:linear-gradient(90deg,var(--blue),#8fd3f5 45%,var(--amber) 72%,var(--red));transition:width .4s ease}
+  .meter .ticks{position:absolute;inset:0;pointer-events:none}
+  .meter .tk{position:absolute;top:0;bottom:0;width:1px;background:rgba(255,255,255,.14)}
+  .meter.alarm{animation:alarm 1s ease-in-out infinite}
+  @keyframes alarm{0%,100%{box-shadow:0 0 0 0 var(--red-soft)}50%{box-shadow:0 0 0 3px var(--red-soft)}}
+  @media (prefers-reduced-motion:reduce){.meter.alarm{animation:none}}
+
+  .layout{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:14px;margin-top:14px;align-items:start}
+  @media (max-width:900px){.layout{grid-template-columns:1fr}}
+
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px}
+  .card .ch{padding:10px 14px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:9px}
+  .card .ch h2{font-family:var(--disp);font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+  .card .ch .rt{margin-left:auto;font-family:var(--mono);font-size:10.5px;color:var(--faint)}
+
+  /* map */
+  .mapcard{overflow:hidden}
+  .mapwrap{position:relative;background:
+      linear-gradient(var(--inset),var(--panel-2));}
+  svg.map{display:block;width:100%;height:auto}
+  .legend{display:flex;flex-wrap:wrap;gap:12px;padding:9px 14px;border-top:1px solid var(--line);font-family:var(--mono);font-size:10.5px;color:var(--muted)}
+  .legend span{display:inline-flex;align-items:center;gap:6px}
+  .legend .d{width:11px;height:11px;border-radius:3px;border:1px solid var(--line-2)}
+  .legend .d.hidden{background:var(--panel)} .legend .d.known{background:#1b2740;border-color:var(--blue)}
+  .legend .d.foot{background:var(--amber)} .legend .d.adm{background:var(--red)} .legend .d.goal{background:var(--gold)}
+
+  /* ops column */
+  .ops{display:flex;flex-direction:column;gap:12px;min-width:0}
+  .intel .cb,.actions .cb,.logc .cb{padding:12px 14px}
+  .intel .nh{display:flex;align-items:center;gap:9px;margin-bottom:8px}
+  .intel .nh .nn{font-family:var(--disp);font-weight:700;font-size:15px;letter-spacing:.01em}
+  .intel .nh .nt{font-family:var(--mono);font-size:10px;color:var(--faint);text-transform:uppercase;letter-spacing:.05em}
+  .statepill{font-family:var(--mono);font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;border-radius:5px;padding:2px 7px;margin-left:auto}
+  .statepill.hidden{color:var(--faint);background:var(--inset)}
+  .statepill.known{color:var(--blue);background:var(--blue-soft)}
+  .statepill.foothold{color:var(--amber);background:var(--amber-soft)}
+  .statepill.admin{color:var(--red);background:var(--red-soft)}
+  .intel .props{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px}
+  .prop{font-family:var(--mono);font-size:10.5px;border:1px solid var(--line-2);border-radius:6px;padding:3px 7px;color:var(--muted)}
+  .prop.hot{color:var(--red-2);border-color:rgba(239,74,94,.4)}
+  .prop.edr{color:var(--blue);border-color:rgba(58,182,240,.4)}
+  .prop.unknown{color:var(--faint);border-style:dashed}
+  .intel .hintline{font-size:12px;color:var(--muted);margin-top:9px;line-height:1.45}
+
+  .actlist{display:flex;flex-direction:column;gap:7px}
+  .act{display:grid;grid-template-columns:1fr auto;gap:3px 10px;align-items:center;text-align:left;
+    background:var(--panel-2);border:1px solid var(--line-2);border-radius:9px;padding:9px 11px;transition:border-color .12s,background .12s}
+  .act:hover:not(:disabled){border-color:var(--red)}
+  .act:active:not(:disabled){transform:translateY(1px)}
+  .act:disabled{opacity:.4;cursor:not-allowed}
+  .act .an{font-weight:600;font-size:13px}
+  .act .aid{font-family:var(--mono);font-size:9.5px;color:var(--faint);grid-column:1;}
+  .act .noise{font-family:var(--mono);font-size:10.5px;color:var(--blue);grid-row:1 / span 2;align-self:center;text-align:right;white-space:nowrap}
+  .act .noise b{font-size:13px;font-weight:700}
+  .act.win{border-color:var(--gold);background:rgba(255,210,74,.08)}
+  .act.win .an{color:var(--gold)}
+  .act.util{border-style:dashed}
+  .noact{font-family:var(--mono);font-size:11.5px;color:var(--faint);line-height:1.5}
+
+  .glob{display:flex;gap:7px;margin-top:10px;flex-wrap:wrap}
+  .creds{display:flex;gap:6px;flex-wrap:wrap;margin-top:4px}
+  .cred{font-family:var(--mono);font-size:10px;font-weight:700;border-radius:5px;padding:3px 7px;letter-spacing:.03em}
+  .cred.user{color:#bcd3f5;background:rgba(120,160,230,.14)}
+  .cred.serverAdmin{color:var(--amber);background:var(--amber-soft)}
+  .cred.domainAdmin{color:var(--red-2);background:var(--red-soft)}
+  .cred.none{color:var(--faint);background:var(--inset)}
+
+  .logbox{font-family:var(--mono);font-size:11.5px;line-height:1.5;max-height:230px;overflow:auto;display:flex;flex-direction:column;gap:2px}
+  .logbox .ln{display:flex;gap:8px}
+  .logbox .ln .t{color:var(--faint);flex:none}
+  .logbox .ln.ok .m{color:var(--green)} .logbox .ln.atk .m{color:var(--fg)}
+  .logbox .ln.noise .m{color:var(--blue)} .logbox .ln.blue .m{color:var(--red-2);font-weight:600}
+  .logbox .ln.win .m{color:var(--gold);font-weight:700}
+
+  button.go{background:var(--red);border:1px solid var(--red);color:#1a0608;border-radius:9px;padding:8px 13px;font-size:12.5px;font-weight:700}
+  button.go:hover{filter:brightness(1.08)}
+  button.ghost{background:transparent;border:1px solid var(--line-2);color:var(--fg);border-radius:9px;padding:8px 12px;font-size:12.5px;font-weight:600}
+  button.ghost:hover{border-color:var(--red)}
+  button.sm{padding:6px 10px;font-size:11.5px}
+
+  /* blue banner */
+  .bluebanner{position:fixed;left:50%;transform:translateX(-50%);top:calc(env(safe-area-inset-top,0px) + 64px);z-index:40;
+    background:var(--panel);border:1px solid var(--red);border-left:4px solid var(--red);border-radius:10px;padding:10px 15px;
+    font-family:var(--mono);font-size:12.5px;color:var(--fg);box-shadow:0 10px 40px rgba(0,0,0,.5);max-width:92vw;opacity:0;pointer-events:none;transition:opacity .3s,transform .3s}
+  .bluebanner.show{opacity:1;transform:translateX(-50%) translateY(0)}
+  .bluebanner b{color:var(--red-2)}
+
+  /* modal */
+  .modal{position:fixed;inset:0;z-index:50;background:rgba(5,8,16,.78);backdrop-filter:blur(4px);display:none;place-items:center;padding:20px}
+  .modal.show{display:grid}
+  .modalcard{background:var(--panel);border:1px solid var(--line-2);border-radius:16px;max-width:520px;width:100%;padding:24px;box-shadow:0 24px 80px rgba(0,0,0,.6)}
+  .modalcard h2{font-family:var(--disp);font-size:22px;letter-spacing:.01em;margin-bottom:4px}
+  .modalcard h2.winh{color:var(--gold)} .modalcard h2.loseh{color:var(--red)}
+  .modalcard .sub{color:var(--muted);font-size:13px;margin-bottom:16px;line-height:1.5}
+  .modalcard .brief{font-size:13.5px;line-height:1.6;color:var(--fg)}
+  .modalcard .brief b{color:var(--amber)}
+  .modalcard ul{margin:12px 0;padding-left:18px} .modalcard li{margin:6px 0;line-height:1.5;font-size:13px}
+  .scoreline{font-family:var(--mono);font-size:13px;color:var(--muted);margin:14px 0;display:flex;flex-direction:column;gap:4px}
+  .scoreline .big{font-size:40px;font-weight:700;color:var(--gold);letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+  .scoreline .rank{font-family:var(--disp);font-size:18px}
+  .modalbtns{display:flex;gap:9px;margin-top:18px;flex-wrap:wrap}
+
+  details.ref{margin-top:16px;border:1px solid var(--line);border-radius:12px;background:var(--panel);overflow:hidden}
+  details.ref summary{cursor:pointer;padding:12px 16px;font-weight:600;font-size:13px;list-style:none;display:flex;gap:8px;align-items:center;font-family:var(--disp);letter-spacing:.02em}
+  details.ref summary::-webkit-details-marker{display:none}
+  details.ref summary::before{content:"+";color:var(--red);font-family:var(--mono);font-weight:700;font-size:15px}
+  details.ref[open] summary::before{content:"\2212"}
+  details.ref .rc{padding:2px 18px 18px;font-size:13px;max-width:74ch;line-height:1.6;color:var(--fg)}
+  details.ref .rc p{margin:9px 0} details.ref .rc .tt{font-family:var(--mono);font-size:12px;background:var(--inset);padding:1px 5px;border-radius:4px;color:var(--amber)}
+  .foot{color:var(--faint);font-size:11px;font-family:var(--mono);margin-top:16px;text-align:center;line-height:1.6}
+  a{color:var(--blue)}
+</style>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=JetBrains+Mono:wght@400;600;700&display=swap">
+
+<div class="wrap">
+  <header class="top">
+    <div class="topline">
+      <div class="brand">
+        <h1><span class="rb">RED</span> vs <span class="bb">BLUE</span> · Race to DA</h1>
+        <div class="sub">chain ATT&CK techniques to Domain Admin before the SOC catches you</div>
+      </div>
+      <div class="stats">
+        <span class="stat obj">objective <b id="objChip">DC-01</b></span>
+        <span class="stat">turn <b id="turnChip">0</b></span>
+        <button class="ghost sm" id="newBtn">new op</button>
+      </div>
+    </div>
+    <div style="margin-top:9px" class="meter-wrap">
+      <div class="meter-top"><span>SOC detection</span><span><b id="detN">0</b>%</span></div>
+      <div class="meter" id="meter"><div class="fill" id="detFill"></div>
+        <div class="ticks"><div class="tk" style="left:50%"></div><div class="tk" style="left:80%"></div></div>
+      </div>
+    </div>
+  </header>
+
+  <div class="layout">
+    <section class="card mapcard" aria-label="network map">
+      <div class="ch"><h2>Network</h2><span class="rt" id="mapHint">select a host</span></div>
+      <div class="mapwrap">
+        <svg class="map" id="map" viewBox="0 0 800 470" role="img" aria-label="enterprise network graph"></svg>
+      </div>
+      <div class="legend">
+        <span><span class="d hidden"></span>unmapped</span>
+        <span><span class="d known"></span>enumerated</span>
+        <span><span class="d foot"></span>foothold</span>
+        <span><span class="d adm"></span>admin</span>
+        <span><span class="d goal"></span>objective</span>
+      </div>
+    </section>
+
+    <div class="ops">
+      <section class="card intel" aria-label="host intel">
+        <div class="ch"><h2>Intel</h2><span class="rt">creds held</span></div>
+        <div class="cb" id="intel"></div>
+      </section>
+      <section class="card actions" aria-label="actions">
+        <div class="ch"><h2>Techniques</h2><span class="rt" id="ampChip"></span></div>
+        <div class="cb">
+          <div class="actlist" id="actlist"></div>
+          <div class="glob" id="globActs"></div>
+        </div>
+      </section>
+      <section class="card logc" aria-label="ops log">
+        <div class="ch"><h2>Ops log</h2></div>
+        <div class="cb"><div class="logbox" id="log"></div></div>
+      </section>
+    </div>
+  </div>
+
+  <details class="ref">
+    <summary>How to play &amp; what the techniques mean</summary>
+    <div class="rc">
+      <p>You start with a phished foothold on one workstation. Your goal: reach <span class="tt">DC-01</span> and run <b>DCSync</b> to own the domain. Every action adds to the SOC's <b>detection meter</b>; hit 100% and you are caught. At 50% the SOC starts hunting (all noise goes up); at 80% it contains a host and resets your foothold there.</p>
+      <p><b>The trade-off is stealth vs speed.</b> Two ways to get credentials: <span class="tt">Credential Dump (T1003)</span> is loud but works on any host you have admin on; <span class="tt">Kerberoasting (T1558.003)</span> is quiet because the crack happens offline, but only works on hosts running a service account. Pick your route.</p>
+      <p><b>Techniques:</b> Enumerate (T1087/T1046) reveals a host's weaknesses. Exploit (T1190) takes a vulnerable host. Privilege Escalation (T1068) turns a foothold into admin. Pass-the-Hash (T1550.002) moves laterally using stolen creds. Clear Logs (T1070) buys down detection. DCSync (T1003.006) is the win.</p>
+      <p>Everything is a fictional network and a game model, not a real toolchain. The lesson is the shape of an attack path and why each step is noisy or quiet.</p>
+    </div>
+  </details>
+  <div class="foot">Breach: Race to DA · an attack-path strategy game · techniques mapped to MITRE ATT&CK</div>
+</div>
+
+<div class="bluebanner" id="blueBanner"></div>
+<div class="modal" id="modal"><div class="modalcard" id="modalCard"></div></div>
+
+<script>
+"use strict";
+(function(){
+  // ============================ MAP DATA ============================
+  // tiers
+  const TIER={none:0,user:1,serverAdmin:2,domainAdmin:3};
+  const TIERNAME={1:"user",2:"serverAdmin",3:"domainAdmin"};
+  function mkNodes(){
+    // state: hidden -> known(enumerated) -> foothold -> admin ; start node begins foothold+enumerated
+    return [
+      {id:"ws1",name:"HR-WS-01",type:"workstation",seg:"user",x:95,y:110,req:"user",loot:"user",svc:null,vuln:false,edr:false,start:true},
+      {id:"ws2",name:"FIN-WS-02",type:"workstation",seg:"user",x:95,y:250,req:"user",loot:"user",svc:null,vuln:false,edr:false},
+      {id:"web",name:"INTRANET-WEB",type:"web server",seg:"user",x:215,y:355,req:"user",loot:"user",svc:null,vuln:true,edr:false},
+      {id:"fs", name:"FILE-SRV-01",type:"file server",seg:"user",x:265,y:180,req:"user",loot:"serverAdmin",svc:"user",vuln:false,edr:false},
+      {id:"jump",name:"JUMP-01",type:"jump box",seg:"bridge",x:400,y:235,req:"user",loot:"user",svc:null,vuln:false,edr:false},
+      {id:"sql",name:"SQL-PROD-01",type:"database",seg:"server",x:555,y:110,req:"serverAdmin",loot:"serverAdmin",svc:"serverAdmin",vuln:false,edr:true},
+      {id:"adm",name:"ADMIN-WS-07",type:"admin workstation",seg:"server",x:560,y:360,req:"serverAdmin",loot:"domainAdmin",svc:null,vuln:false,edr:false},
+      {id:"dc", name:"DC-01",type:"domain controller",seg:"server",x:705,y:235,req:"domainAdmin",loot:"domainAdmin",svc:null,vuln:false,edr:true,goal:true},
+    ];
+  }
+  const EDGES=[["ws1","ws2"],["ws1","web"],["ws2","fs"],["web","fs"],["fs","jump"],["jump","sql"],["jump","adm"],["sql","dc"],["adm","dc"]];
+
+  // ============================ GAME STATE ============================
+  let G;
+  function newGame(){
+    const nodes=mkNodes();
+    const byId={}; nodes.forEach(n=>{ n.state="hidden"; n.enumerated=false; n.looted=false; n.kerbed=false; byId[n.id]=n; });
+    const s=byId.ws1; s.state="foothold"; s.enumerated=true;
+    G={ nodes, byId, det:0, turn:0, creds:new Set(["none"]), credMax:0, amp:1, over:false, won:false,
+        logs:[], selected:"ws1", triage:false, contained:false, clearCd:0 };
+    log("atk","operation start: phished foothold on HR-WS-01 (T1566)");
+  }
+  function neighbors(id){ const r=[]; EDGES.forEach(e=>{ if(e[0]===id)r.push(e[1]); if(e[1]===id)r.push(e[0]); }); return r; }
+  function hasCompromisedNeighbor(id){ return neighbors(id).some(n=>{const x=G.byId[n];return x.state==="foothold"||x.state==="admin";}); }
+  function anyCompromised(){ return G.nodes.some(n=>n.state==="foothold"||n.state==="admin"); }
+  function addCred(tier){ if(!tier)return; G.creds.add(tier); G.credMax=Math.max(G.credMax,TIER[tier]); }
+
+  // ============================ ACTIONS ============================
+  // noise values (base); multiplied by amp and edr
+  const ACT={
+    enumerate:{name:"Enumerate",aid:"T1087 / T1046",noise:2,util:false,
+      can:n=>!n.enumerated && n.state!=="foothold" && n.state!=="admin" && hasCompromisedNeighbor(n.id),
+      edr:false,
+      run:n=>{ n.enumerated=true; if(n.state==="hidden")n.state="known"; return `enumerated ${n.name}: ${describe(n)}`; }},
+    exploit:{name:"Exploit Public Service",aid:"T1190",noise:8,
+      can:n=>n.enumerated && n.vuln && n.state==="known" && hasCompromisedNeighbor(n.id),
+      edr:true,
+      run:n=>{ n.state="foothold"; return `exploited a vulnerable service on ${n.name}: foothold`; }},
+    pth:{name:"Pass-the-Hash",aid:"T1550.002",noise:5,
+      can:n=>n.enumerated && (n.state==="known") && hasCompromisedNeighbor(n.id) && G.credMax>=TIER[n.req],
+      edr:true,
+      run:n=>{ n.state="foothold"; return `moved laterally to ${n.name} with stolen ${TIERNAME[TIER[n.req]]} creds: foothold`; }},
+    privesc:{name:"Privilege Escalation",aid:"T1068",noise:5,
+      can:n=>n.state==="foothold",
+      edr:true,
+      run:n=>{ n.state="admin"; return `escalated to admin/SYSTEM on ${n.name}`; }},
+    dump:{name:"Credential Dump",aid:"T1003",noise:15,
+      can:n=>n.state==="admin" && n.loot && !n.looted,
+      edr:true,
+      run:n=>{ n.looted=true; addCred(n.loot); return `dumped credentials on ${n.name}: harvested ${n.loot} creds`; }},
+    kerberoast:{name:"Kerberoasting",aid:"T1558.003",noise:4,
+      can:n=>n.enumerated && n.svc && !n.kerbed && anyCompromised(),
+      edr:true,
+      run:n=>{ n.kerbed=true; addCred(n.svc); return `kerberoasted ${n.name}, cracked offline: harvested ${n.svc} creds`; }},
+    dcsync:{name:"DCSync: own the domain",aid:"T1003.006",noise:30,win:true,
+      can:n=>n.goal && (n.state==="foothold"||n.state==="admin") && G.credMax>=TIER.domainAdmin,
+      edr:true,
+      run:n=>{ n.state="admin"; return `DCSync against ${n.name}: replicated every domain hash`; }},
+  };
+  function describe(n){
+    const bits=[];
+    if(n.vuln)bits.push("unpatched public service");
+    if(n.svc)bits.push(`service account (${n.svc})`);
+    if(n.loot)bits.push(`cached ${n.loot} creds`);
+    if(n.edr)bits.push("EDR present");
+    bits.push(`needs ${n.req} to access`);
+    return bits.join(", ");
+  }
+  function actNoise(a,n){ let base=a.noise; let mult=G.amp; if(a.edr && n.edr) mult*=1.5; return Math.round(base*mult); }
+
+  function doAction(key,nodeId){
+    if(G.over) return;
+    const a=ACT[key], n=G.byId[nodeId];
+    if(!a||!n||!a.can(n)) return;
+    const noise=actNoise(a,n);
+    const msg=a.run(n);
+    G.turn++;
+    log("atk",`${a.name} (${a.aid}): ${msg}`);
+    if(a.win){ winGame(); return; } // DCSync is the win; the grab-and-go noise no longer matters
+    raiseDet(noise, a.name);
+    if(G.over) return; // raiseDet may have triggered loseGame
+    checkBlue();
+    render();
+  }
+  function clearLogs(){
+    if(G.over||G.clearCd>0) return;
+    G.turn++; G.clearCd=3;
+    const before=G.det; G.det=Math.max(0,G.det-15);
+    log("atk",`Clear Logs (T1070): tampered with event logs`);
+    log("ok",`detection ${Math.round(before)}% -> ${Math.round(G.det)}%`);
+    raiseDet(3,"Clear Logs");
+    checkBlue(); render();
+  }
+  function raiseDet(noise,label){
+    G.det=Math.min(100,G.det+noise);
+    log("noise",`+${noise} detection (${label}) -> ${Math.round(G.det)}%`);
+    if(G.det>=100 && !G.over){ loseGame(); }
+  }
+  function checkBlue(){
+    if(G.over) return;
+    if(!G.triage && G.det>=50){ G.triage=true; G.amp=1.25;
+      blueEvent("SOC triage active", "Analysts are hunting. All actions are now <b>+25% noisier</b>.");
+      log("blue","SOC triage: detection >= 50%, all noise +25%"); }
+    if(!G.contained && G.det>=80){ G.contained=true;
+      // reset a random compromised non-start, non-goal host
+      const cand=G.nodes.filter(x=>(x.state==="foothold"||x.state==="admin") && !x.start && !x.goal);
+      if(cand.length){ const v=cand[Math.floor(Math.random()*cand.length)]; v.state="known"; v.looted=false;
+        blueEvent("Host contained", `The SOC isolated <b>${v.name}</b> and killed your session. Re-establish if you need it.`);
+        log("blue",`containment: ${v.name} isolated, foothold lost`); }
+    }
+    if(G.clearCd>0)G.clearCd--;
+  }
+
+  // ============================ WIN / LOSE ============================
+  function winGame(){
+    G.over=true; G.won=true;
+    const d=Math.round(G.det);
+    const stealth=d<40?200:d<65?80:0;
+    const score=Math.max(0, 1000 - G.turn*6 - d*4 + stealth);
+    const rank=score>=820?"S":score>=680?"A":score>=540?"B":"C";
+    log("win",`DOMAIN OWNED. turns ${G.turn}, detection ${d}%, score ${score} (${rank})`);
+    render();
+    showModal(`<h2 class="winh">Domain owned</h2>
+      <div class="sub">DCSync complete. You walked out with every hash in the domain, and the SOC is still reading yesterday's alerts.</div>
+      <div class="scoreline"><span>final score</span><span class="big">${score}</span><span class="rank" style="color:${rankColor(rank)}">rank ${rank}</span>
+      <span>turns ${G.turn} · peak detection ${d}%${stealth?` · stealth bonus +${stealth}`:""}</span></div>
+      <div class="modalbtns"><button class="go" id="againBtn">run it again</button></div>`);
+  }
+  function loseGame(){
+    G.over=true; G.won=false;
+    log("blue",`CAUGHT. the SOC pulled your access at turn ${G.turn}`);
+    render();
+    showModal(`<h2 class="loseh">Caught</h2>
+      <div class="sub">Detection hit 100%. Incident response isolated your hosts and rotated the credentials you stole. Game over.</div>
+      <div class="brief">Next run: lean on <b>Kerberoasting</b> over <b>Credential Dumping</b> where you can, avoid privilege escalation on <b>EDR</b> hosts, and spend <b>Clear Logs</b> before you cross 50%.</div>
+      <div class="modalbtns"><button class="go" id="againBtn">try again</button></div>`);
+  }
+  function rankColor(r){ return r==="S"?"var(--gold)":r==="A"?"var(--green)":r==="B"?"var(--amber)":"var(--muted)"; }
+
+  // ============================ RENDER ============================
+  const $=id=>document.getElementById(id);
+  const elMap=$("map"),elIntel=$("intel"),elActs=$("actlist"),elGlob=$("globActs"),elLog=$("log"),
+        elDetN=$("detN"),elDetFill=$("detFill"),elMeter=$("meter"),elTurn=$("turnChip"),elAmp=$("ampChip"),elMapHint=$("mapHint");
+  const NODEW=118,NODEH=46;
+
+  function render(){ renderMap(); renderIntel(); renderActions(); renderMeter(); elTurn.textContent=G.turn; }
+
+  function renderMeter(){
+    const d=Math.round(G.det);
+    elDetN.textContent=d; elDetFill.style.width=d+"%";
+    elMeter.classList.toggle("alarm", d>=80 && !G.over);
+    elAmp.textContent = G.amp>1 ? "SOC hunting · noise x"+G.amp : "";
+  }
+
+  function stateColor(n){
+    if(n.state==="admin") return n.goal?"var(--gold)":"var(--red)";
+    if(n.state==="foothold") return "var(--amber)";
+    if(n.state==="known") return "var(--blue)";
+    return "#1a2338";
+  }
+  function renderMap(){
+    const ns=G.nodes, byId=G.byId;
+    let svg="";
+    // edges
+    EDGES.forEach(e=>{
+      const a=byId[e[0]],b=byId[e[1]];
+      const comp = (a.state==="foothold"||a.state==="admin") && (b.state==="foothold"||b.state==="admin");
+      const known = (a.state!=="hidden")&&(b.state!=="hidden");
+      svg+=`<line x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}" stroke="${comp?'var(--red)':known?'var(--line-2)':'var(--line)'}" stroke-width="${comp?2.4:1.4}" ${comp?'':'stroke-dasharray="4 5"'} opacity="${known?0.95:0.5}"/>`;
+    });
+    // nodes
+    ns.forEach(n=>{
+      const col=stateColor(n);
+      const sel = n.id===G.selected;
+      const cx=n.x-NODEW/2, cy=n.y-NODEH/2;
+      const fill = n.state==="hidden"?"#0c1322":n.state==="known"?"#111c30":n.state==="foothold"?"rgba(240,169,58,.14)":n.goal?"rgba(255,210,74,.14)":"rgba(239,74,94,.16)";
+      svg+=`<g class="node" data-id="${n.id}" style="cursor:pointer">`;
+      if(sel) svg+=`<rect x="${cx-4}" y="${cy-4}" width="${NODEW+8}" height="${NODEH+8}" rx="12" fill="none" stroke="var(--fg)" stroke-width="1.5" opacity="0.8"/>`;
+      svg+=`<rect x="${cx}" y="${cy}" width="${NODEW}" height="${NODEH}" rx="10" fill="${fill}" stroke="${col}" stroke-width="${sel?2.4:1.6}"/>`;
+      // status dot
+      svg+=`<circle cx="${cx+12}" cy="${cy+NODEH/2}" r="4.5" fill="${col}"/>`;
+      // name + type
+      const nm = n.state==="hidden" ? "unmapped host" : n.name;
+      svg+=`<text x="${cx+26}" y="${cy+19}" fill="${n.state==='hidden'?'var(--faint)':'var(--fg)'}" font-family="JetBrains Mono, monospace" font-size="11.5" font-weight="600">${nm}</text>`;
+      svg+=`<text x="${cx+26}" y="${cy+34}" fill="var(--muted)" font-family="JetBrains Mono, monospace" font-size="9">${n.state==='hidden'?'? enumerate to reveal':n.type}</text>`;
+      // flags
+      let fx=cx+NODEW-9;
+      if(n.goal){ svg+=`<text x="${cx+NODEW-16}" y="${cy+16}" font-size="12">🏁</text>`; }
+      if(n.edr && n.enumerated){ svg+=`<circle cx="${cx+NODEW-10}" cy="${cy+NODEH-11}" r="3.5" fill="var(--blue)"><title>EDR</title></circle>`; }
+      svg+=`</g>`;
+    });
+    elMap.innerHTML=svg;
+    elMap.querySelectorAll(".node").forEach(g=>g.addEventListener("click",()=>{ G.selected=g.dataset.id; renderIntel(); renderActions(); renderMap(); }));
+    const sn=byId[G.selected];
+    elMapHint.textContent = sn? sn.name+" selected" : "select a host";
+  }
+
+  function renderIntel(){
+    const n=G.byId[G.selected];
+    let html=`<div class="nh"><span class="nn">${n.state==="hidden"?"Unmapped host":n.name}</span>`+
+      `<span class="statepill ${n.state}">${n.state}</span></div>`+
+      `<div class="nt">${n.state==="hidden"?"identity unknown":n.type} · segment ${n.seg}</div>`;
+    html+=`<div class="props">`;
+    if(!n.enumerated){ html+=`<span class="prop unknown">weaknesses not enumerated</span>`; }
+    else{
+      html+=`<span class="prop">needs <b>${n.req}</b></span>`;
+      if(n.vuln)html+=`<span class="prop hot">vulnerable service</span>`;
+      if(n.svc)html+=`<span class="prop hot">svc account: ${n.svc}</span>`;
+      if(n.loot)html+=`<span class="prop">cached ${n.loot} creds</span>`;
+      if(n.edr)html+=`<span class="prop edr">EDR</span>`;
+    }
+    html+=`</div>`;
+    // creds held
+    html+=`<div class="hintline" style="margin-top:12px;color:var(--faint);font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.06em">credentials held</div>`;
+    html+=`<div class="creds">`;
+    const held=[...G.creds].filter(c=>c!=="none");
+    if(!held.length) html+=`<span class="cred none">none yet</span>`;
+    else ["user","serverAdmin","domainAdmin"].forEach(t=>{ if(G.creds.has(t)) html+=`<span class="cred ${t}">${t}</span>`; });
+    html+=`</div>`;
+    elIntel.innerHTML=html;
+  }
+
+  function renderActions(){
+    const n=G.byId[G.selected];
+    elActs.innerHTML="";
+    const order=["enumerate","exploit","pth","privesc","dump","kerberoast","dcsync"];
+    let any=false;
+    order.forEach(key=>{
+      const a=ACT[key];
+      if(!a.can(n)) return;
+      any=true;
+      const noise=actNoise(a,n);
+      const b=document.createElement("button");
+      b.className="act"+(a.win?" win":"");
+      b.innerHTML=`<span class="an">${a.name}</span><span class="aid">${a.aid}</span>`+
+        `<span class="noise"><b>+${noise}</b><br>detect</span>`;
+      b.addEventListener("click",()=>doAction(key,n.id));
+      elActs.appendChild(b);
+    });
+    if(!any){ const d=document.createElement("div"); d.className="noact";
+      d.textContent = n.state==="hidden" ? "No compromised neighbor can reach this host yet. Work a path toward it." :
+                      (n.state==="foothold"||n.state==="admin") ? "Nothing more to do here. Pivot to an adjacent host, or harvest creds." :
+                      "Enumerate this host from a compromised neighbor to find a way in.";
+      elActs.appendChild(d); }
+    // global actions
+    elGlob.innerHTML="";
+    const cl=document.createElement("button"); cl.className="act util"; cl.style.gridColumn="1 / -1";
+    cl.disabled=G.clearCd>0;
+    cl.innerHTML=`<span class="an">Clear Logs ${G.clearCd>0?`(cooldown ${G.clearCd})`:""}</span><span class="aid">T1070 · -15 detection</span><span class="noise"><b>+3</b><br>detect</span>`;
+    cl.addEventListener("click",clearLogs);
+    elGlob.appendChild(cl);
+  }
+
+  function log(cls,m){
+    G.logs.push({cls,m,t:G.turn});
+    const d=document.createElement("div"); d.className="ln "+cls;
+    d.innerHTML=`<span class="t">${String(G.turn).padStart(2,"0")}</span><span class="m">${m}</span>`;
+    elLog.appendChild(d);
+    while(elLog.children.length>120) elLog.removeChild(elLog.firstChild);
+    elLog.scrollTop=elLog.scrollHeight;
+  }
+
+  // ============================ BANNER / MODAL ============================
+  let bannerT=null;
+  function blueEvent(title,body){
+    const el=$("blueBanner"); el.innerHTML=`<b>${title}.</b> ${body}`;
+    el.classList.add("show");
+    if(bannerT)clearTimeout(bannerT);
+    bannerT=setTimeout(()=>el.classList.remove("show"),4200);
+  }
+  function showModal(html){
+    const c=$("modalCard"); c.innerHTML=html; $("modal").classList.add("show");
+    const ab=$("againBtn"); if(ab)ab.addEventListener("click",()=>{ $("modal").classList.remove("show"); start(); });
+  }
+
+  // ============================ BRIEFING / BOOT ============================
+  function briefing(){
+    showModal(`<h2>Operation briefing</h2>
+      <div class="sub">You are red team. You have a phished foothold. The domain controller is the prize.</div>
+      <div class="brief">
+        <b>Goal:</b> reach <b>DC-01</b> and run DCSync.<br>
+        <b>Watch:</b> the SOC detection meter up top. Hit 100% and you are caught.
+        <ul>
+          <li>Click a host to select it; available techniques appear on the right.</li>
+          <li><b>Enumerate</b> a host to reveal how to attack it.</li>
+          <li>Prefer quiet <b>Kerberoasting</b> over loud <b>Credential Dumping</b> when a host runs a service account.</li>
+          <li><b>EDR</b> hosts make everything you do on them noisier.</li>
+        </ul>
+      </div>
+      <div class="modalbtns"><button class="go" id="againBtn">start the op</button></div>`);
+  }
+  function start(){ newGame(); render(); }
+
+  // expose for headless tests
+  window.__RB={getG:()=>G,doAction,clearLogs,newGame,start,ACT,neighbors,raiseDet,actNoise};
+
+  start();
+  briefing();
+})();
+</script>
